@@ -6,6 +6,7 @@ from conduit.extensions import qrcode
 
 from conduit.wrapper import valid_wrapper
 from conduit.wrapper import clean_id_wrapper
+from conduit.wrapper import check_space_data_wrapper
 
 from conduit import temp_db
 
@@ -19,6 +20,7 @@ docu_coded = temp_db.docu_coded
 
 @bp.route("/fetch/")
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def fetch(id):
     which_get = request.args.get('which_get')
@@ -88,6 +90,7 @@ def fetch(id):
 
 @bp.route("/fetch-qr/")
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def fetch_qr(docid):
     global docu_coded
@@ -102,6 +105,7 @@ def fetch_qr(docid):
 
 @bp.route('/fetch-doc-qr/')
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def fetch_doc_qr(userid):
     str_code = request.args.get('str_code')
@@ -195,6 +199,7 @@ def add():
 
 @bp.route("/edit", methods=('GET', 'PUT'))
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def edit(id):
     if request.method == 'PUT':
@@ -223,6 +228,7 @@ def edit(id):
 
 @bp.route('/pin-doc', methods=('GET', 'POST'))
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def pin_doc(userid, docid):
     if request.method == 'POST':
@@ -260,6 +266,7 @@ def pin_doc(userid, docid):
 
 @bp.route('/unpin-doc/', methods=('GET', 'DELETE'))
 @valid_wrapper
+@check_space_data_wrapper
 @clean_id_wrapper
 def unpin_doc(userid, docid):
     if request.method == 'DELETE':

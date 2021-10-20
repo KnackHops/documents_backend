@@ -20,7 +20,7 @@ def index():
 
 @app.after_request
 def after_request_func(response):
-    if not request.path == "/" and not request.path == '/link-verify/':
+    if not request.path == "/" and not request.path == '/link-verify/' and not request.path == '/test-celery-task':
         response.headers['Content-Type'] = 'application/json'
 
     return response
