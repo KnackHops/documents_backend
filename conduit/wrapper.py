@@ -10,10 +10,10 @@ def clean_id_wrapper(func):
         else:
             data = request.json
 
-        id_lists = id_check(data)
+        checked_id = id_check(data)
 
-        if id_lists:
-            return func(*args, **kwargs, **id_lists)
+        if checked_id:
+            return func(*args, **kwargs, **checked_id)
 
         return {"error": "missing values"}, 400
 
@@ -33,6 +33,35 @@ def id_check(data):
                 return False
 
     return return_list_id
+
+
+def check_space_data_wrapper(func):
+    @wraps(func)
+    def inside(*args, **kwargs):
+        if request.args:
+            data = request.args.to_dict()
+        else:
+            data = request.json
+
+        space_protocol_alert = check_key_space(data)
+
+        if space_protocol_alert:
+            return {"error": f"Invalid whitespace in {space_protocol_alert}"}
+
+        return func(*args, **kwargs)
+    return inside
+
+
+def check_key_space(data):
+    key_lists = ["email", "username", "password", "id", "userid", "mobile", "role", "docid", "code"]
+
+    for key in data:
+        if key in key_lists:
+            if not type(data[key]) == int:
+                if " " in data[key]:
+                    return key
+
+    return False
 
 
 def valid_wrapper(func):
@@ -63,3 +92,5 @@ def validity_check(list_req):
             return {'error': f'{key} is empty'}, 400
 
     return None
+
+

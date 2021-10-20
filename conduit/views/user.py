@@ -1,6 +1,6 @@
 import random
 
-from functools import wraps
+from celery.result import AsyncResult
 
 from flask import Blueprint
 from flask import request
@@ -8,22 +8,16 @@ from flask import make_response
 
 from conduit.wrapper import valid_wrapper
 from conduit.wrapper import clean_id_wrapper
+from conduit.wrapper import check_space_data_wrapper
+
+from conduit.views.celery_task import send_email
+from conduit.views.celery_task import password_attempt_timeout
 
 from conduit import temp_db
-
-from conduit.views.celery_task import add_num
 
 
 bp = Blueprint("user", __name__)
 
-
-@bp.route('/celery-test')
-def celery_test():
-    result = add_num.delay(2, 3)
-
-    print(result)
-
-    return "<p> Hello </p>"
 
 bp = Blueprint("user", __name__)
 user_data = temp_db.user_data
@@ -33,23 +27,7 @@ user_subordinate = temp_db.user_subordinate
 user_email_unverified = temp_db.user_email_unverified
 
 password_attempt = {}
-
-
-def check_space_data_wrapper(func):
-    @wraps(func)
-    def inside(*args, **kwargs):
-        if request.args:
-            data = request.args.to_dict()
-        else:
-            data = request.json
-
-        space_protocol_alert = check_key_space(data)
-
-        if space_protocol_alert:
-            return {"error": f"Invalid whitespace in {space_protocol_alert}"}
-
-        return func(*args, **kwargs)
-    return inside
+password_attempt_timer = {}
 
 
 @bp.route('/admin-fetch/')
@@ -225,12 +203,12 @@ def admin_activate(id, userid):
         if error_code:
             return {'error': error}, error_code
         else:
-            isVerif = True
+            is_verif = True
             if len(user_email_unverified) > 0:
                 for user_verif in user_email_unverified:
                     if user_verif['userid'] == userid:
-                        isVerif = False
-            if isVerif:
+                        is_verif = False
+            if is_verif:
                 new_user_data = []
                 for user in user_data:
                     upd_user = user
@@ -299,22 +277,29 @@ def login():
         username = request.json['username']
         password = request.json['password']
 
+        user_str = None
         for user_login in login_data:
             if user_login['username'] == username:
-                # user_str = f'user{username}'
-                #
-                # if user_str in password_attempt:
-                #     if password_attempt[user_str] < 10:
-                #         password_attempt[user_str] += 1
-                #     else:
-                #         return {'error': 'max attempt reached'}, 500
-                # else:
-                #     password_attempt[user_str] = 0
+                user_str = f'user{username}'
+
+                if user_str in password_attempt:
+                    if password_attempt[user_str] < 10:
+                        password_attempt[user_str] += 1
+                    else:
+                        if is_timer_done(user_str):
+                            pass_reset_elapse(user_str)
+                            password_attempt[user_str] = 1
+                        else:
+                            print("max attempt please wait")
+                            return {'error': 'max attempt reached'}, 500
+                else:
+                    password_attempt[user_str] = 1
 
                 if user_login['password'] == password:
                     id = user_login['id']
 
         if id or id == 0:
+            pass_reset_elapse(user_str)
             return_user = {}
 
             if len(user_email_unverified) > 0:
@@ -338,8 +323,20 @@ def login():
 
             return make_response((return_user, 200))
         else:
+            if user_str:
+                print(password_attempt)
+                print(password_attempt_timer)
+                if password_attempt[user_str] == 10 and user_str not in password_attempt_timer:
+                    uid = password_attempt_timeout.delay()
+                    password_attempt_timer[user_str] = uid
 
             return {'error': 'Wrong password or Username'}, 500
+
+
+def is_timer_done(userid):
+    result = password_attempt_timer[userid]
+
+    return result.ready()
 
 
 @bp.route('/link-verify/')
@@ -462,7 +459,7 @@ def resend_verification( userid ):
                 if error:
                     return {'error': error}, 409
                 else:
-                    success_email = send_email(username, new_code, user_email)
+                    send_email.delay(username, new_code, user_email)
                     return '', 204
             else:
                 return {'error': 'User is verified!'}, 409
@@ -551,7 +548,7 @@ def register():
             user_data.append(new_user)
             user_email_unverified.append(new_unverified)
 
-            success_email = send_email(request.json['username'], new_code, request.json['email'])
+            send_email.delay(request.json['username'], new_code, request.json['email'])
 
             return make_response(({'id': id, 'username': request.json['username']}, 200))
 
@@ -697,73 +694,9 @@ def update_user(userid):
             return {'error': 'no user detected'}, 409
 
 
-def send_email(username, code, user_email):
-    import os
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from conduit.template.html_template import (
-        htmlFile, textFile
-    )
+def pass_reset_elapse(user_str):
+    if password_attempt[user_str]:
+        del (password_attempt[user_str])
+        if user_str in password_attempt_timer:
+            del (password_attempt_timer[user_str])
 
-    EMAIL_ADD_GMAIL = os.environ.get('EMAIL_USER_GMAIL')
-    EMAIL_PASS_GMAIL = os.environ.get('EMAIL_PASSWORD_GMAIL')
-    EMAIL_ADD_YAHOO = os.environ.get('EMAIL_USER_YAHOO')
-    EMAIL_PASS_YAHOO = os.environ.get('EMAIL_PASSWORD_YAHOO')
-
-    msg = MIMEMultipart('alternative')
-
-    msg['Subject'] = f'Verification code for Documenter'
-    msg['From'] = EMAIL_ADD_GMAIL
-    msg['To'] = EMAIL_ADD_GMAIL
-    # msg['To'] = user_email
-
-    link = f'http://127.0.0.1:5000/link-verify/?username={username}&code={code}'
-    new_text_file = textFile.replace('username-here', username)
-    new_text_file = new_text_file.replace('code-here', code)
-    new_text_file = new_text_file.replace('link-here', link)
-
-    new_html_file = htmlFile.replace('username-here', username)
-    new_html_file = new_html_file.replace('code-here', code)
-    new_html_file = new_html_file.replace('link-here', link)
-
-    part_text = MIMEText(new_text_file, 'plain')
-    part_html = MIMEText(new_html_file, 'html')
-
-    msg.attach(part_text)
-    msg.attach(part_html)
-
-    success = smtp_send_off('smtp.gmail.com', EMAIL_ADD_GMAIL, EMAIL_PASS_GMAIL, msg)
-
-    if not success:
-        return smtp_send_off('smtp.mail.yahoo.com', EMAIL_ADD_YAHOO, EMAIL_PASS_YAHOO, msg)
-    else:
-        return success
-
-    return False
-
-
-def smtp_send_off(smtp_server, email_address, email_password, msg):
-    import smtplib
-
-    with smtplib.SMTP_SSL(smtp_server, 465) as smtp:
-        smtp.login(email_address, email_password)
-        try:
-            smtp.send_message(msg)
-            print("email sent!")
-            return True
-        except smtplib.SMTPResponseException as err:
-            print("error sending code!")
-            print(err)
-            return False
-
-
-def check_key_space(data):
-    key_lists = ["email", "username", "password", "id", "userid", "mobile", "role", "docid", "code"]
-
-    for key in data:
-        if key in key_lists:
-            if not type(data[key]) == int:
-                if " " in data[key]:
-                    return key
-
-    return False
